@@ -63,3 +63,7 @@ Related upstream records were researched separately:
 - The historical `plugins/autofrontlight.koplugin/` around KOReader v2024.11 polled a coarse ambient level through background jobs and toggled the light. It did not synchronize a live level into KOReader's cached brightness. The bridge is deliberately not a revival of that algorithm.
 
 A core Kindle override could resemble PocketBook's live method, but a safe core change would also need capability gating, failure validation, opt-in policy, and Kindle off/remembered-level handling. That is not a tiny unconditional patch and would change behavior for every Kindle user. The primary deliverable therefore remains this reversible external plugin; no upstream patch is included.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
