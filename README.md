@@ -6,7 +6,7 @@ The plugin does not implement Auto Brightness. Amazon `powerd` remains the contr
 
 ## Requirements and limits
 
-- Kindle with a frontlight, an ambient-light sensor, and a usable live `frontlightIntensityHW()` read.
+- Kindle with a frontlight, an ambient-light sensor, and the live `frontlightIntensityHW()` API. The plugin accepts KOReader's `hasLightSensor()` report or confirms the native Kindle sensor through the existing LIPC handle's read-only `alsLux` property; it never uses that value as a brightness input.
 - The Kindle stock UI must have Auto Brightness enabled before KOReader starts if automatic changes are wanted. KOReader does not enable or configure that setting.
 - The plugin is opt-in and disabled by default. It is harmless when Kindle Auto Brightness is disabled: it only observes the current hardware level when the user asks KOReader to read brightness.
 - No lux curve, brightness algorithm, polling timer, warmth/AutoWarmth control, model table, raw sysfs access, shell LIPC command, or KOReader fork is used.
@@ -28,7 +28,7 @@ The plugin is intentionally not installed to a physical Kindle by the builder. F
 
 ## Runtime behavior
 
-Enabling wraps only the active Kindle PowerD instance's `frontlightIntensity()` method. Each call first preserves the original method as a fallback, then safely calls the existing Kindle-native `frontlightIntensityHW()` conversion/read path. A validated live level above the backend minimum updates `fl_intensity` and `is_fl_on` and is returned. A validated minimum/off read returns the public off value `0` without replacing a remembered non-zero `fl_intensity`; that remembered value is what Kindle's existing on path can restore. Nil, errors, non-numbers, NaN, and out-of-range reads leave the cache untouched and return the original result or a safe cached fallback.
+Enabling wraps only the active Kindle PowerD instance's `frontlightIntensity()` method. Plugin discovery checks that the live-read API exists but deliberately does not perform a brightness read, because a transient startup LIPC failure must not hide the plugin permanently. Sensor capability comes from KOReader's model flag when available, with a read-only native `alsLux` probe through the existing Kindle LIPC handle for models whose KOReader flag is incomplete. The lux value is discarded and never drives brightness. Each runtime brightness call first preserves the original method as a fallback, then safely calls the existing Kindle-native `frontlightIntensityHW()` conversion/read path. A validated live level above the backend minimum updates `fl_intensity` and `is_fl_on` and is returned. A validated minimum/off read returns the public off value `0` without replacing a remembered non-zero `fl_intensity`; that remembered value is what Kindle's existing on path can restore. Nil, errors, non-numbers, NaN, and out-of-range reads leave the cache untouched and return the original result or a safe cached fallback.
 
 The wrapper is installed at most once on a PowerD instance. Disable restores the exact previous raw instance method (including restoring inheritance when the original method was inherited). Resume only re-checks the existing wrapper; it schedules no work. Manual `setIntensity()` remains authoritative and still writes the requested absolute value through KOReader's existing path.
 

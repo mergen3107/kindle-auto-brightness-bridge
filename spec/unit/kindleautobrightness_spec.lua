@@ -118,6 +118,19 @@ describe("Kindle Auto Brightness Bridge", function()
             return self.hardware
         end
 
+        if options.als_lux ~= nil then
+            powerd.lipc_handle = {
+                get_int_property = function(_, service, property)
+                    assert.equals("com.lab126.powerd", service)
+                    assert.equals("alsLux", property)
+                    if options.als_lux == "error" then
+                        error("ALS read failed")
+                    end
+                    return options.als_lux
+                end,
+            }
+        end
+
         powerd.frontlightIntensity = function(self)
             if not self.is_fl_on then
                 return 0
@@ -275,19 +288,41 @@ describe("Kindle Auto Brightness Bridge", function()
         reset_settings()
     end)
 
-    it("is disabled on non-Kindle, non-ALS, non-frontlit, and non-readable devices", function()
+    it("is disabled on non-Kindle, non-ALS, non-frontlit, and API-unsupported devices", function()
         local cases = {
             { kindle = false },
             { light_sensor = false },
             { frontlight = false },
             { remove_live_reader = true },
-            { frontlightIntensityHW = function() return nil end },
-            { frontlightIntensityHW = function() error("read failed") end },
-            { frontlightIntensityHW = function() return 25 end },
         }
         for _, options in ipairs(cases) do
             local plugin_class = new_plugin(options)
             assert.is_true(plugin_class.disabled)
+        end
+    end)
+
+    it("detects a native Kindle ALS when KOReader's model flag is incomplete", function()
+        local plugin_class, plugin = new_plugin({
+            light_sensor = false,
+            als_lux = 40,
+        })
+        assert.is_nil(plugin_class.disabled)
+        assert.is_not_nil(plugin)
+    end)
+
+    it("loads when the live API exists even if its startup read would fail", function()
+        local readers = {
+            function() return nil end,
+            function() error("startup read failed") end,
+            function() return 25 end,
+        }
+        for _, reader in ipairs(readers) do
+            local plugin_class, plugin, _, _, powerd = new_plugin({
+                frontlightIntensityHW = reader,
+            })
+            assert.is_nil(plugin_class.disabled)
+            assert.is_not_nil(plugin)
+            assert.equals(10, powerd:frontlightIntensity())
         end
     end)
 

@@ -37,20 +37,29 @@ local function get_powerd(device)
     return powerd
 end
 
-local function has_usable_live_read(powerd)
-    if type(powerd.frontlightIntensityHW) ~= "function" then
+local function has_live_read(powerd)
+    return type(powerd.frontlightIntensityHW) == "function"
+end
+
+local function has_native_light_sensor(powerd)
+    local lipc_handle = powerd and powerd.lipc_handle
+    if lipc_handle == nil then
         return false
     end
-    local ok, intensity = pcall(powerd.frontlightIntensityHW, powerd)
-    return ok and valid_intensity(powerd, intensity)
+    local ok, lux = pcall(function()
+        return lipc_handle:get_int_property("com.lab126.powerd", "alsLux")
+    end)
+    return ok and type(lux) == "number" and lux >= 0
 end
 
 local capability_powerd = get_powerd(Device)
+local has_sensor = has_capability(Device, "hasLightSensor")
+    or has_native_light_sensor(capability_powerd)
 if not has_capability(Device, "isKindle")
         or not has_capability(Device, "hasFrontlight")
-        or not has_capability(Device, "hasLightSensor")
+        or not has_sensor
         or not capability_powerd
-        or not has_usable_live_read(capability_powerd) then
+        or not has_live_read(capability_powerd) then
     return { disabled = true }
 end
 
