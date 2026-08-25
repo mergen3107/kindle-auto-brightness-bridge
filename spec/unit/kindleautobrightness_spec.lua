@@ -339,6 +339,7 @@ describe("Kindle Auto Brightness Bridge", function()
         local menu_items = {}
         plugin:addToMainMenu(menu_items)
         local item = menu_items.kindleautobrightness
+        assert.equals("more_tools", item.sorting_hint)
         assert.is_false(item.checked_func())
 
         local updates = 0

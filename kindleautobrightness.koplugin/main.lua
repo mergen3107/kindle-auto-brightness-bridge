@@ -232,6 +232,7 @@ end
 function KindleAutoBrightness:addToMainMenu(menu_items)
     menu_items.kindleautobrightness = {
         text = _("Synchronize with Kindle Auto Brightness"),
+        sorting_hint = "more_tools",
         checked_func = function()
             return self.enabled
         end,
