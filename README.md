@@ -1,115 +1,61 @@
-# Kindle Auto Brightness Bridge
+# Kindle Auto Brightness Bridge for KOReader
 
-In KOReader on a Kindle, screen brightness does not normally follow the surrounding light the way it does in the native Kindle reader. This plugin lets KOReader stay in sync with the Kindle's Auto Brightness, so brightness can adapt as the light around you changes.
+A lightweight KOReader plugin for Kindles with ambient light sensors (Oasis, Voyage, Paperwhite SE, Scribe) that keeps KOReader's brightness controls in sync with the Kindle's native auto-brightness.
 
-## What this fixes
+## The Problem
 
-The Kindle may adjust screen brightness while KOReader still remembers an earlier level. KOReader's brightness controls can then behave as if the screen were still at that old level.
+When you run KOReader on a Kindle, the Kindle OS still adjusts the screen's frontlight in the background based on ambient light. However, KOReader caches its own brightness level in memory and doesn't know when the hardware changes underneath it.
 
-With the plugin enabled, KOReader checks the brightness that the Kindle is currently using whenever KOReader needs it. The Kindle still decides how bright the screen should be; the plugin does not calculate brightness itself.
+This leads to annoying jumps: the Kindle might dim the screen in a dark room, but the next time you swipe to adjust brightness in KOReader, KOReader starts from its old cached value and suddenly snaps the light back to that level.
 
-## Is this plugin for my Kindle?
+## What this plugin does
 
-The plugin requires all of the following:
+Instead of relying on KOReader's cached brightness, this plugin wraps KOReader's brightness read method (`frontlightIntensity()`) to query the live hardware intensity directly from Kindle's native power daemon (`powerd:frontlightIntensityHW()`) whenever KOReader needs it.
 
-- a Kindle with a frontlight;
-- an ambient-light sensor; and
-- a KOReader version that can read the Kindle's current brightness.
+- **Zero background polling**: It only queries the hardware when KOReader actually asks for the current brightness (e.g. when you swipe, open the frontlight menu, or receive an OSD update). No background timers or battery drain.
+- **Lets Kindle OS do the heavy lifting**: The Kindle's native firmware handles the light sensor and ambient curves; this plugin just makes sure KOReader stays in sync.
+- **Clean and reversible**: No KOReader core patches needed. You can toggle it on or off on the fly from KOReader's menu.
 
-On unsupported devices, the plugin stays disabled and does not add its menu item.
+## Requirements
 
-To receive automatic brightness changes, enable Auto Brightness in the stock Kindle interface **before starting KOReader**. The plugin cannot enable or configure Auto Brightness for you.
+- A Kindle with a frontlight and ambient light sensor (e.g., Kindle Oasis 2/3, Kindle Voyage, Kindle Paperwhite Signature Edition, Kindle Scribe).
+- Stock Kindle **Auto Brightness** enabled in the native Kindle settings before opening KOReader.
+- A modern KOReader version.
 
-## Install and enable
+*(If your Kindle doesn't have an ambient light sensor or frontlight, the plugin automatically disables itself and hides from the menu).*
 
-1. Download or copy this repository's `kindleautobrightness.koplugin/` directory.
-2. Copy the whole directory, including `_meta.lua` and `main.lua`, into KOReader's `plugins/` directory on the Kindle. The final path should be:
+## Installation
 
-   `.../koreader/plugins/kindleautobrightness.koplugin/`
+1. Copy the `kindleautobrightness.koplugin` folder into your Kindle's KOReader plugins directory:
+   ```text
+   koreader/plugins/kindleautobrightness.koplugin/
+   ```
+2. Restart KOReader.
+3. Make sure **Auto Brightness** is turned on in the native Kindle swipe-down menu.
+4. In KOReader, open the top menu and go to **More tools** (wrench icon) → check **Synchronize with Kindle Auto Brightness**.
 
-3. Restart KOReader once so it discovers the plugin.
-4. In the stock Kindle interface, enable Auto Brightness.
-5. Start KOReader and open **More tools**.
-6. Check **Synchronize with Kindle Auto Brightness**.
+The plugin is disabled by default. Once checked, KOReader's brightness gestures and dialogs work as normal, but always start from the actual current light level.
 
-The bridge is disabled by default. Once enabled, it works with KOReader's existing brightness controls; it adds no separate brightness screen.
+## How it works
 
-## Use
+KOReader's generic power management (`PowerD`) keeps an internal `fl_intensity` cache and returns it whenever a widget or gesture calls `frontlightIntensity()`.
 
-Leave **More tools** → **Synchronize with Kindle Auto Brightness** checked. Use KOReader's brightness gestures, actions, and controls as usual.
+When enabled, this plugin hooks `frontlightIntensity()` on the active Kindle `PowerD` instance:
+1. It queries the live hardware level via KOReader's Kindle LIPC interface (`frontlightIntensityHW()`).
+2. If the light is on, it updates KOReader's cached `fl_intensity` and frontlight state to match the hardware.
+3. If the light is off (`0` / minimum), it reports `0` while preserving the last remembered non-zero level so KOReader can restore it properly when turned back on.
 
-You can turn the plugin off while KOReader is running. Turning it off restores KOReader's normal brightness behavior immediately; you do not need to restart KOReader.
-
-## Limits
-
-- The Kindle, not this plugin, chooses the brightness from the surrounding light.
-- It does not control warmth or AutoWarmth.
-- It does not enable Kindle Auto Brightness. If Auto Brightness is off, the plugin can only report the current screen brightness when KOReader asks for it.
-- It checks the brightness when KOReader asks for it, rather than running a timer in the background.
-- Manual brightness changes in KOReader still take effect normally.
-- If it cannot read the current brightness, KOReader keeps using its previous brightness information.
+If you adjust brightness manually inside KOReader, your manual change takes effect as usual, and the Kindle's auto-brightness algorithm adapts from the new baseline.
 
 ## Troubleshooting
 
-### The menu item is missing
-
-1. Check that the directory is named exactly `kindleautobrightness.koplugin`.
-2. Check that it contains both `_meta.lua` and `main.lua`.
-3. Restart KOReader once after copying the directory.
-4. Confirm that the device is a Kindle with a frontlight and ambient-light sensor.
-
-The plugin also requires a KOReader version that can read the Kindle's current brightness. If the Kindle or KOReader does not support this, the menu item remains hidden.
-
-### Brightness does not change automatically
-
-Enable Auto Brightness in the stock Kindle interface, then restart KOReader. Enabling it after KOReader starts may not produce automatic changes during that session.
-
-Also confirm that **More tools** → **Synchronize with Kindle Auto Brightness** is checked. The saved setting is `kindleautobrightness_enabled`.
-
-### KOReader uses the wrong brightness or a read fails
-
-Turn the bridge off and on once. If the problem continues, enable KOReader debug logging and look for lines beginning with `KindleAutoBrightness:`. The plugin can log these exact messages:
-
-- `KindleAutoBrightness: live frontlight read unavailable`
-- `KindleAutoBrightness: original frontlightIntensity failed`
-- `KindleAutoBrightness: refusing to replace another frontlight wrapper`
-- `KindleAutoBrightness: leaving a changed frontlight method untouched`
-
-When reporting a problem, include those lines and nearby `PowerD` or frontlight messages, along with:
-
-- the KOReader version;
-- the Kindle model and firmware;
-- whether stock Auto Brightness was enabled before KOReader started; and
-- the action that produced the problem.
-
-Remove credentials and unrelated private information from logs before sharing them.
-
-## Technical notes
-
-KOReader normally keeps a remembered frontlight level and returns it from `frontlightIntensity()`. Kindle's own Auto Brightness can change the hardware level without updating that remembered value. The next relative gesture may therefore start from the wrong brightness.
-
-While enabled, this plugin wraps `frontlightIntensity()` on the active Kindle PowerD instance. Each call uses KOReader's existing `frontlightIntensityHW()` path to read the live level. A valid non-zero result updates KOReader's remembered level and frontlight state. An off reading returns `0` without erasing the last non-zero level, so KOReader can still restore that level when the light turns on again.
-
-The plugin uses KOReader's light-sensor capability flag when available. If that flag is incomplete for a Kindle model, it checks for the native sensor by reading the existing LIPC handle's `alsLux` property. It discards the lux value; the check only establishes that the sensor exists.
-
-The wrapper is installed at most once. Resume checks that it is still present but schedules no background work. On disable, the plugin restores the exact method that was there before it enabled itself. If another component has replaced that method, the plugin leaves the changed method alone and logs a diagnostic message.
-
-### KOReader background and upstream context
-
-The implementation was checked against `koreader/koreader` `master` commit `5e45c4b5c7bc5d29dee5ce98b3e9c380905788d8`, fetched on 2026-08-25.
-
-- KOReader's generic PowerD code keeps the cached frontlight level used by `frontlightIntensity()`.
-- The Kindle backend already provides `frontlightIntensityHW()` through LIPC, including Kindle-specific level and off-state handling. This plugin reuses that code instead of controlling the hardware itself.
-- KOReader's relative brightness controls, notifications, and frontlight dialog read through `frontlightIntensity()`, so changing that one read path covers the user-facing behavior without polling.
-
-Related upstream discussions:
-
-- [Issue #13259](https://github.com/koreader/koreader/issues/13259) describes the stale cached brightness problem and discusses live LIPC reads.
-- [Issue #13400](https://github.com/koreader/koreader/issues/13400) discusses ambient-light functionality and confirms that Kindle Auto Brightness can continue working while KOReader is open.
-- [PR #12809](https://github.com/koreader/koreader/pull/12809) removed KOReader's old `autofrontlight` plugin. That plugin polled a coarse ambient level and toggled the light; it did not synchronize Kindle's live brightness with KOReader's cached value.
-
-This repository provides a reversible, opt-in external plugin. It does not include a KOReader core patch.
+- **Menu item doesn't appear under "More tools"**:
+  Make sure the directory is placed at `koreader/plugins/kindleautobrightness.koplugin` and contains both `_meta.lua` and `main.lua`. If the files are in place, the plugin detected that the device is either not a Kindle or lacks an ambient light sensor / live frontlight read capability.
+- **Brightness doesn't adjust automatically**:
+  Check that native Auto Brightness was turned on in the stock Kindle OS before launching KOReader. If you enabled it while KOReader was already running, restart KOReader.
+- **Debugging**:
+  Enable debug logging in KOReader (**Settings** → **Device** → **Developer options** → **Enable debug log**) and look for messages starting with `KindleAutoBrightness:`.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+[MIT](LICENSE)
