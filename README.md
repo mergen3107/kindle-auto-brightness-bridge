@@ -13,6 +13,7 @@ This leads to annoying jumps: the Kindle might dim the screen in a dark room, bu
 Instead of relying on KOReader's cached brightness, this plugin wraps KOReader's brightness read method (`frontlightIntensity()`) to query the live hardware intensity directly from Kindle's native power daemon (`powerd:frontlightIntensityHW()`) whenever KOReader needs it.
 
 - **Zero background polling**: It only queries the hardware when KOReader actually asks for the current brightness (e.g. when you swipe, open the frontlight menu, or receive an OSD update). No background timers or battery drain.
+- **Optional live warmth synchronization**: On devices with a hardware warmth reader, a separate setting makes KOReader read the Kindle's actual current warmth whenever KOReader asks for it. It is disabled by default and does not choose or run a warmth schedule.
 - **Lets Kindle OS do the heavy lifting**: The Kindle's native firmware handles the light sensor and ambient curves; this plugin just makes sure KOReader stays in sync.
 - **Clean and reversible**: No KOReader core patches needed. You can toggle it on or off on the fly from KOReader's menu.
 
@@ -33,8 +34,9 @@ Instead of relying on KOReader's cached brightness, this plugin wraps KOReader's
 2. Restart KOReader.
 3. Make sure **Auto Brightness** is turned on in the native Kindle swipe-down menu.
 4. In KOReader, open the top menu and go to **More tools** (wrench icon) → check **Synchronize with Kindle Auto Brightness**.
+5. On devices with hardware warmth support, optionally check **Synchronize with Kindle scheduled warmth**. This setting is independent of brightness synchronization and is disabled by default.
 
-The plugin is disabled by default. Once checked, KOReader's brightness gestures and dialogs work as normal, but always start from the actual current light level.
+The plugin is disabled by default. Once brightness synchronization is checked, KOReader's brightness gestures and dialogs work as normal, but always start from the actual current light level.
 
 ## How it works
 
@@ -46,6 +48,12 @@ When enabled, this plugin hooks `frontlightIntensity()` on the active Kindle `Po
 3. If the light is off (`0` / minimum), it reports `0` while preserving the last remembered non-zero level so KOReader can restore it properly when turned back on.
 
 If you adjust brightness manually inside KOReader, your manual change takes effect as usual, and the Kindle's auto-brightness algorithm adapts from the new baseline.
+
+### Optional warmth synchronization
+
+When **Synchronize with Kindle scheduled warmth** is enabled, the plugin wraps KOReader's public warmth read method and asks the Kindle for the current applied hardware warmth whenever KOReader needs it. It uses KOReader's existing hardware reader and conversion, updates only KOReader's cached warmth value, and does not write warmth merely to synchronize it.
+
+This setting follows the warmth currently applied by the Kindle, including changes made by the Kindle's own schedule. It does not choose or run a schedule. If KOReader's AutoWarmth plugin is also enabled, the Kindle and KOReader schedulers remain independent; do not expect them to cooperate as one algorithm.
 
 ## Troubleshooting
 

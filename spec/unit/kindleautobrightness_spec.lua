@@ -98,7 +98,9 @@ describe("Kindle Auto Brightness Bridge", function()
     local original_devicelistener
 
     local SETTING = "kindleautobrightness_enabled"
+    local WARMTH_SETTING = "kindleautobrightness_warmth_enabled"
     local WRAPPER_STATE = "_kindle_auto_brightness_bridge_state"
+    local WARMTH_WRAPPER_STATE = "_kindle_auto_warmth_bridge_state"
 
     local function reset_settings()
         _G.G_reader_settings:reset({})
@@ -106,16 +108,49 @@ describe("Kindle Auto Brightness Bridge", function()
 
     local function make_powerd(options)
         options = options or {}
+        local warmth_max = options.fl_warmth_max or 24
         local powerd = {
             fl_min = options.fl_min or 0,
             fl_max = options.fl_max or 24,
             fl_intensity = options.fl_intensity or 10,
             hardware = options.hardware or 20,
             is_fl_on = options.is_fl_on ~= false,
+            fl_warmth_min = options.fl_warmth_min or 0,
+            fl_warmth_max = warmth_max,
+            fl_warmth = options.fl_warmth or 50,
+            hardware_warmth = options.hardware_warmth or 12,
+            warmth_scale = 100 / warmth_max,
+            warmth_writes = 0,
+            warmth_reads = 0,
         }
 
         powerd.frontlightIntensityHW = options.frontlightIntensityHW or function(self)
             return self.hardware
+        end
+        powerd.toNativeWarmth = function(self, warmth)
+            return math.floor(warmth / self.warmth_scale + 0.5)
+        end
+        powerd.fromNativeWarmth = function(self, warmth)
+            return math.floor(warmth * self.warmth_scale + 0.5)
+        end
+        powerd.frontlightWarmthHW = options.frontlightWarmthHW or function(self)
+            self.warmth_reads = self.warmth_reads + 1
+            return self:fromNativeWarmth(self.hardware_warmth)
+        end
+        powerd.setWarmthHW = function(self, warmth)
+            self.warmth_writes = self.warmth_writes + 1
+            self.hardware_warmth = warmth
+        end
+        powerd.frontlightWarmth = function(self)
+            return self.fl_warmth
+        end
+        powerd.setWarmth = function(self, warmth)
+            if warmth == self:frontlightWarmth() then
+                return false
+            end
+            self.fl_warmth = math.min(100, math.max(0, warmth))
+            self:setWarmthHW(self:toNativeWarmth(self.fl_warmth))
+            return true
         end
 
         if options.als_lux ~= nil then
@@ -189,6 +224,9 @@ describe("Kindle Auto Brightness Bridge", function()
         if options.remove_live_reader then
             powerd.frontlightIntensityHW = nil
         end
+        if options.remove_warmth_reader then
+            powerd.frontlightWarmthHW = nil
+        end
         return powerd
     end
 
@@ -212,6 +250,9 @@ describe("Kindle Auto Brightness Bridge", function()
         function device:hasLightSensor()
             return options.light_sensor ~= false
         end
+        function device:hasNaturalLight()
+            return options.natural_light ~= false
+        end
         function device:hasGSensor()
             return false
         end
@@ -234,11 +275,14 @@ describe("Kindle Auto Brightness Bridge", function()
         return dofile(main_path)
     end
 
-    local function new_plugin(options, setting)
+    local function new_plugin(options, setting, warmth_setting)
         reset_settings()
         local device = make_device(options)
         if setting ~= nil then
             _G.G_reader_settings:saveSetting(SETTING, setting)
+        end
+        if warmth_setting ~= nil then
+            _G.G_reader_settings:saveSetting(WARMTH_SETTING, warmth_setting)
         end
         local menu = {}
         function menu:registerToMainMenu(plugin)
@@ -332,6 +376,173 @@ describe("Kindle Auto Brightness Bridge", function()
         assert.is_false(plugin.enabled)
         assert.is_false(_G.G_reader_settings:readSetting(SETTING))
         assert.is_nil(powerd[WRAPPER_STATE])
+    end)
+
+    it("provides translated long-press help for the brightness setting", function()
+        local _, plugin = new_plugin({})
+        local menu_items = {}
+        plugin:addToMainMenu(menu_items)
+
+        local help_text = menu_items.kindleautobrightness.help_text
+        assert.is_string(help_text)
+        assert.is_truthy(help_text:find("external plugin", 1, true))
+        assert.is_truthy(help_text:find("Amazon", 1, true))
+        assert.is_truthy(help_text:find("hardware brightness", 1, true))
+        assert.is_truthy(help_text:find("native Kindle Auto Brightness", 1, true))
+        assert.is_truthy(help_text:find("does not", 1, true))
+        assert.is_truthy(help_text:find("ambient light sensor", 1, true))
+        assert.is_truthy(help_text:find("algorithm", 1, true))
+    end)
+
+    it("starts warmth synchronization disabled and persists an explicit false default", function()
+        local _, plugin, _, _, powerd = new_plugin({})
+        assert.is_false(plugin.warmth_enabled)
+        assert.is_false(_G.G_reader_settings:readSetting(WARMTH_SETTING))
+        assert.is_nil(powerd[WARMTH_WRAPPER_STATE])
+
+        local menu_items = {}
+        plugin:addToMainMenu(menu_items)
+        local item = menu_items.kindleautobrightness_warmth
+        assert.is_not_nil(item)
+        assert.is_false(item.checked_func())
+    end)
+
+    it("toggles warmth synchronization persistently and immediately", function()
+        local _, plugin, _, _, powerd = new_plugin({})
+        local menu_items = {}
+        plugin:addToMainMenu(menu_items)
+        local item = menu_items.kindleautobrightness_warmth
+
+        item.callback()
+        assert.is_true(plugin.warmth_enabled)
+        assert.is_true(_G.G_reader_settings:isTrue(WARMTH_SETTING))
+        assert.is_not_nil(powerd[WARMTH_WRAPPER_STATE])
+        assert.is_true(item.checked_func())
+
+        item.callback()
+        assert.is_false(plugin.warmth_enabled)
+        assert.is_false(_G.G_reader_settings:isTrue(WARMTH_SETTING))
+        assert.is_nil(powerd[WARMTH_WRAPPER_STATE])
+        assert.is_false(item.checked_func())
+    end)
+
+    it("restores persisted warmth synchronization on startup", function()
+        local _, plugin, _, _, powerd = new_plugin({}, nil, true)
+        assert.is_true(plugin.warmth_enabled)
+        assert.is_true(_G.G_reader_settings:isTrue(WARMTH_SETTING))
+        assert.is_not_nil(powerd[WARMTH_WRAPPER_STATE])
+    end)
+
+    it("hides warmth synchronization without natural light or a hardware reader", function()
+        local cases = {
+            { natural_light = false },
+            { remove_warmth_reader = true },
+        }
+        for _, options in ipairs(cases) do
+            local _, plugin = new_plugin(options, nil, true)
+            assert.is_false(plugin.warmth_enabled)
+            assert.is_false(_G.G_reader_settings:isTrue(WARMTH_SETTING))
+
+            local menu_items = {}
+            plugin:addToMainMenu(menu_items)
+            assert.is_nil(menu_items.kindleautobrightness_warmth)
+        end
+    end)
+
+    it("reads live warmth in the KOReader scale without writing hardware", function()
+        local _, plugin, _, _, powerd = new_plugin({
+            hardware_warmth = 6,
+        })
+        plugin:_setWarmthEnabled(true)
+        powerd.fl_warmth = 75
+
+        assert.equals(25, powerd:frontlightWarmth())
+        assert.equals(25, powerd.fl_warmth)
+        assert.equals(0, powerd.warmth_writes)
+        assert.equals(1, powerd.warmth_reads)
+    end)
+
+    it("uses live warmth through DeviceListener increase and decrease gestures", function()
+        local _, plugin, _, device, powerd = new_plugin({
+            hardware_warmth = 6,
+        })
+        plugin:_setWarmthEnabled(true)
+        local notifications = {}
+        local device_listener = load_device_listener(device, notifications)
+        local listener = setmetatable({}, { __index = device_listener })
+
+        powerd.fl_warmth = 75
+        listener:onIncreaseFlWarmth(1)
+        assert.equals(7, powerd.hardware_warmth)
+        assert.equals(29, powerd.fl_warmth)
+        assert.equals("Warmth set to 7.", notifications[#notifications])
+
+        powerd.hardware_warmth = 10
+        powerd.fl_warmth = 75
+        listener:onDecreaseFlWarmth(1)
+        assert.equals(9, powerd.hardware_warmth)
+        assert.equals(38, powerd.fl_warmth)
+        assert.equals("Warmth set to 9.", notifications[#notifications])
+    end)
+
+    it("preserves cached warmth for invalid live reads and keeps manual warmth usable", function()
+        local _, plugin, _, _, powerd = new_plugin({})
+        plugin:_setWarmthEnabled(true)
+        local invalid_readers = {
+            function() return nil end,
+            function() error("temporary warmth read failure") end,
+            function() return "50" end,
+            function() return 101 end,
+            function() return -1 end,
+            function() return 0 / 0 end,
+        }
+        for _, reader in ipairs(invalid_readers) do
+            powerd.frontlightWarmthHW = reader
+            powerd.fl_warmth = 42
+            powerd.hardware_warmth = 12
+            local ok, result = pcall(function() return powerd:frontlightWarmth() end)
+            assert.is_true(ok)
+            assert.equals(42, result)
+            assert.equals(42, powerd.fl_warmth)
+
+            assert.is_true(powerd:setWarmth(50))
+            assert.equals(50, powerd.fl_warmth)
+            assert.equals(12, powerd.hardware_warmth)
+        end
+    end)
+
+    it("keeps brightness and warmth wrappers independently idempotent and reversible", function()
+        local _, plugin, _, _, powerd = new_plugin({})
+        local original_intensity = powerd.frontlightIntensity
+        local original_warmth = powerd.frontlightWarmth
+
+        plugin:_setEnabled(true)
+        local intensity_wrapper = powerd.frontlightIntensity
+        plugin:_setWarmthEnabled(true)
+        local warmth_wrapper = powerd.frontlightWarmth
+        assert.are_not.equal(intensity_wrapper, warmth_wrapper)
+        assert.is_not_nil(powerd[WRAPPER_STATE])
+        assert.is_not_nil(powerd[WARMTH_WRAPPER_STATE])
+
+        plugin:_setEnabled(true)
+        plugin:_setWarmthEnabled(true)
+        plugin:onResume()
+        plugin:onResume()
+        assert.equals(intensity_wrapper, powerd.frontlightIntensity)
+        assert.equals(warmth_wrapper, powerd.frontlightWarmth)
+
+        plugin:_setWarmthEnabled(false)
+        assert.equals(original_warmth, powerd.frontlightWarmth)
+        assert.equals(original_warmth, rawget(powerd, "frontlightWarmth"))
+        assert.is_nil(powerd[WARMTH_WRAPPER_STATE])
+        assert.equals(intensity_wrapper, powerd.frontlightIntensity)
+
+        plugin:_setEnabled(false)
+        assert.equals(original_intensity, powerd.frontlightIntensity)
+        assert.equals(original_intensity, rawget(powerd, "frontlightIntensity"))
+        assert.is_nil(powerd[WRAPPER_STATE])
+        assert.is_nil(plugin.timer)
+        assert.is_nil(plugin.timers)
     end)
 
     it("toggles persistently and installs the live wrapper immediately", function()
